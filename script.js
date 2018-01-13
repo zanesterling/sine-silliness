@@ -5,6 +5,7 @@
 // TODO: Add delta color settings (change per unit time).
 // TODO: Add more render modes.
 // TODO: Add randomizer.
+
 // TODO: Fix click-and-drag on sine wave property sliders.
 // TODO: Tweak how frequency works to make it prettier.
 // TODO: Fix drop bug. To repro: drop one, click on ctrl panel, try drop.
@@ -48,7 +49,6 @@ tryBoot();
 
 
 function update() {
-    // state.sines = count(state.numSines).reverse().map(makeSine);
     if (state.sines.length < state.numSines) {
         let indices = ints(state.sines.length, state.numSines - 1);
         state.sines = indices.map(makeSine).concat(state.sines);
@@ -87,30 +87,55 @@ function zsin(th) { return (Math.sin(th) + 1) / 2; }
 function zcos(th) { return (Math.cos(th) + 1) / 2; }
 
 function render(t) {
+    // Clear canvas.
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, w, h);
 
-    ctx.fillStyle = "rgb(255,0,0)";
-
-    let withBuffer = 1.2;
+    // Compute row offsets.
     let cfg = {};
+    let withBuffer = 1.2;
     cfg.rowHeight = h / (withBuffer * state.numSines - (withBuffer - 1));
     cfg.rowHeightWithBuffer = cfg.rowHeight * withBuffer;
 
-    var stackedSines = [];
-    for (let i = 0; i < state.sines.length; i++) {
-        stackedSines.push(state.sines[i]);
+
+    // Draw rows.
+    let bottom = h;
+    let surface = Array(state.numSamples).fill(bottom);
+    for (let i of iota(state.numSines).reverse()) {
+        // Set color.
+        let r = (state.numSines - i) * 255 / state.numSines;
+        ctx.fillStyle = "rgb(" + r + ",0,0)";
+
+        // Determine base height.
+        let sine = state.sines[i];
         if (!state.dropped[i]) {
-            drawRow(t, stackedSines, i, cfg);
-            stackedSines = [];
+            let newBottom = cfg.rowHeightWithBuffer * (i+1);
+            surface.fill(newBottom);
+        }
+
+        // Draw sine.
+        for (let x of iota(state.numSamples)) {
+            let frac = columnFrac(t, sine, x);
+            let colHeight = cfg.rowHeight * frac;
+            fillRectBottomUp(ctx, 5*x, surface[x], 5, colHeight);
+            surface[x] -= colHeight;
         }
     }
 }
 
-DFREQ_MAG = 10;
-DFREQ_RATE = 0.1;
-DPHASE_MAG = 0.5;
-DAMPL_MAG = 0.1;
+const DFREQ_MAG = 10;
+const DFREQ_RATE = 0.1;
+const DPHASE_MAG = 0.5;
+const DAMPL_MAG = 0.1;
+
+function columnFrac(t, sine, x) {
+    let y = (x + 0.5) / state.numSamples;
+    let freq = sine.frequency +
+        DFREQ_MAG * sine.dfreq * Math.sin(DFREQ_RATE * t);
+    let phase = (sine.phase + DPHASE_MAG * sine.dphase * t) / 100;
+    let ampl = (sine.amplitude * zcos(DAMPL_MAG * sine.dampl * t)) / 100;
+    return ampl * zcos((y+phase) * freq * TAU);
+}
 
 function drawRow(t, stack, row, {rowHeight, rowHeightWithBuffer}) {
     iota(state.numSamples).forEach(x => {
