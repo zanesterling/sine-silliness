@@ -1,77 +1,179 @@
 /* jshint esnext: true */
 
-run = function () {
+// TODO: Add falling.
+// TODO: Add d color settings (change per curve).
+// TODO: Add delta color settings (change per unit time).
+// TODO: Add more render modes.
+// TODO: Add randomizer.
+// TODO: Fix click-and-drag on sine wave property sliders.
+// TODO: Tweak how frequency works to make it prettier.
+// TODO: Fix drop bug. To repro: drop one, click on ctrl panel, try drop.
+
+function run() {
     canvas = document.getElementById('canvas');
     canvas.width = 640;
-    canvas.height = 480;
+    canvas.height = 2000;
     ctx = canvas.getContext('2d');
     w = canvas.width;
     h = canvas.height;
 
-    state = {};
-    let inputs = document.getElementsByClassName('input');
+    state = {t: 0};
+    let inputs = document.getElementsByClassName('input global');
     Array.from(inputs).forEach(input => {
-        input.onchange=inputChanged;
-        inputChanged({target: input});
+        input.oninput = inputChanged;
+        inputChanged({target: input}, doUpdate=false);
     });
+    state.sines = count(state.numSines).reverse().map(makeSine);
+    state.dropped = state.sines.map(_ => false);
+
+    let left = document.getElementById('left-controls');
+    left.appendChild(leftControls(state.sines));
+    let right = document.getElementById('right-controls');
+    right.appendChild(rightControls(state.sines));
+    let gbs = document.getElementById('gravity-bars');
+    gravityBars(state.numSines).forEach(gb => gbs.appendChild(gb));
 
     update();
     render(0);
-};
+}
 
-update = function() {
-    state.sines = count(state.numSines).reverse().map(makeSine);
-    canvas.width = 5 * state.numSamples + 20;
+function tryBoot() {
+    if (document.readyState === 'complete') {
+        run();
+    } else {
+        window.setTimeout(tryBoot, 100);
+    }
+}
+tryBoot();
 
-    let left = document.getElementsByClassName('left')[0];
-    while (left.firstChild) { left.removeChild(left.firstChild); }
-    left.appendChild(leftControls(state.sines));
-};
 
-const TAU = Math.PI * 2;
+function update() {
+    // state.sines = count(state.numSines).reverse().map(makeSine);
+    if (state.sines.length < state.numSines) {
+        let indices = ints(state.sines.length, state.numSines - 1);
+        state.sines = indices.map(makeSine).concat(state.sines);
+        state.dropped = indices.map(_ => false).concat(state.dropped);
+    } else if (state.sines.length > state.numSines) {
+        let toRemove = state.sines.length - state.numSines;
+        state.sines.splice(0, toRemove);
+        state.dropped.splice(0, toRemove);
+    }
+    canvas.width = 5 * state.numSamples;
 
-render = function(t) {
+    { // Update interface.
+        let left = document.getElementById('left-controls');
+        while (left.firstChild) { left.removeChild(left.firstChild); }
+        left.appendChild(leftControls(state.sines));
+
+        let right = document.getElementById('right-controls');
+        while (right.firstChild) { right.removeChild(right.firstChild); }
+        right.appendChild(rightControls(state.sines));
+
+        let gbs = document.getElementById('gravity-bars');
+        while (gbs.firstChild) { gbs.removeChild(gbs.firstChild); }
+        gravityBars(state.numSines).forEach(gb => gbs.appendChild(gb));
+    }
+
+    state.t += 0.001;
+    render(state.t);
+
+    if (state.sines.some(sine => sine.dfreq || sine.dphase || sine.dampl)) {
+        setTimeout(update, 16);
+    }
+}
+
+var TAU = Math.PI * 2;
+function zsin(th) { return (Math.sin(th) + 1) / 2; }
+function zcos(th) { return (Math.cos(th) + 1) / 2; }
+
+function render(t) {
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, w, h);
+
     ctx.fillStyle = "rgb(255,0,0)";
 
-    let margin = 10;
-    let buffer = 0.2;
-    let rowHeight = ((h - 2 * margin) / (state.numSines * (1 + buffer)));
-    iota(state.sines.length).forEach(i => {
-        let sine = state.sines[i];
-        iota(state.numSamples).forEach(x => {
-            let sinArg = x * sine.frequency / state.numSamples * TAU;
-            let ampl = rowHeight * sine.amplitude / 100;
-            // fillRectBottomUp(ctx, margin + 5*x, 100, 20, 20);
-            fillRectBottomUp(ctx,
-                margin + 5*x,
-                margin + (i+1) * rowHeight * (1 + buffer),
-                5,
-                ampl * (Math.cos(sinArg) + 1) * 0.5);
+    let withBuffer = 1.2;
+    let cfg = {};
+    cfg.rowHeight = h / (withBuffer * state.numSines - (withBuffer - 1));
+    cfg.rowHeightWithBuffer = cfg.rowHeight * withBuffer;
+
+    var stackedSines = [];
+    for (let i = 0; i < state.sines.length; i++) {
+        stackedSines.push(state.sines[i]);
+        if (!state.dropped[i]) {
+            drawRow(t, stackedSines, i, cfg);
+            stackedSines = [];
+        }
+    }
+}
+
+DFREQ_MAG = 10;
+DFREQ_RATE = 0.1;
+DPHASE_MAG = 0.5;
+DAMPL_MAG = 0.1;
+
+function drawRow(t, stack, row, {rowHeight, rowHeightWithBuffer}) {
+    iota(state.numSamples).forEach(x => {
+        let vals = stack.map(sine => {
+            let y = (x + 0.5) / state.numSamples;
+            let freq = sine.frequency +
+                DFREQ_MAG * sine.dfreq * Math.sin(DFREQ_RATE * t);
+            let phase = (sine.phase + DPHASE_MAG * sine.dphase * t) / 100;
+            let ampl = (sine.amplitude * zcos(DAMPL_MAG * sine.dampl * t)) / 100;
+            return ampl * zcos((y+phase) * freq * TAU);
         });
+        let height = sum(vals);
+        fillColumn(
+            ctx,
+            5*x, row * rowHeightWithBuffer,
+            5, rowHeight,
+            height
+        );
     });
-};
+}
+
+function sum(l) {
+    var s = 0;
+    for (let i = 0; i < l.length; i++) {
+        s += l[i];
+    }
+    return s;
+}
+
+
+function fillColumn(ctx, left, top, width, height, frac) {
+    ctx.fillRect(left, top + height * (1-frac), width, height * frac);
+}
 
 function fillRectBottomUp(ctx, left, bot, width, height) {
     ctx.fillRect(left, bot - height, width, height);
 }
 
-function inputChanged(event) {
+function inputChanged(event, doUpdate=true) {
     let input = event.target;
-    let varName = input.id.split('-')[1];
-    state[varName] = parseInt(input.value);
+    if (input.classList.contains('global')) {
+        state[input.name] = parseInt(input.value);
+    } else if (input.classList.contains('local')) {
+        var [varName, i] = input.name.split('-');
+        state.sines[i][varName] = parseInt(input.value);
+    }
 
-    update();
-    render(0);
+    if (doUpdate) update();
 }
 
-function iota(n) { return count(n-1, [0]); }
+function iota(n) { return ints(0, n-1); }
 
-function count(n, l) {
-    if (!l) {l = [];}
+function count(n, l=[]) {
     for (var i = 0; i < n ; i++) {
         l.push(i+1);
+    }
+    return l;
+}
+
+function ints(low, high) {
+    let l = [];
+    for (var i = low; i <= high; i++) {
+        l.push(i);
     }
     return l;
 }
@@ -93,12 +195,68 @@ function leftControls(sines) {
     var i = 0;
     sines.forEach(sine => {
         let item = document.createElement('li');
-        // TODO: Add controls for each sin wave.
-        item.innerHTML = "blah";
+        let div = document.createElement('div');
+        div.appendChild(newSlider('frequency-' + i,  1, 50,  sine.frequency));
+        div.appendChild(newSlider('phase-' + i,    -50, 50,  sine.phase));
+        div.appendChild(newSlider('amplitude-' + i, 10, 100, sine.amplitude));
+        item.appendChild(div);
         list.appendChild(item);
         i++;
     });
     return list;
 }
 
-window.onload = run;
+function rightControls(sines) {
+    var list = document.createElement('ul');
+    list.classList.add('controls');
+    var i = 0;
+    sines.forEach(sine => {
+        let item = document.createElement('li');
+        let div = document.createElement('div');
+        div.appendChild(newSlider('dfreq-'  + i, 0, 100, sine.dfreq));
+        div.appendChild(newSlider('dphase-' + i, -100, 100, sine.dphase));
+        div.appendChild(newSlider('dampl-'  + i, 0, 100, sine.dampl));
+        item.appendChild(div);
+        list.appendChild(item);
+        i++;
+    });
+    return list;
+}
+
+function newSlider(name, min, max, value) {
+    let div = document.createElement('div');
+    div.classList.add('input-wrapper');
+    let slider = document.createElement('input');
+    slider.name = name;
+    slider.type = 'range';
+    slider.min = min;
+    slider.max = max;
+    slider.value = value;
+    slider.classList.add('slider');
+    slider.classList.add('input');
+    slider.classList.add('local');
+    slider.oninput = inputChanged;
+    div.appendChild(slider);
+    return div;
+}
+
+function gravityBars(n) {
+    return iota(n).map((i) => {
+        let li = document.createElement('li');
+        li.innerHTML = '<div> </div>';
+        li.onclick = drop(i);
+        return li;
+    });
+}
+
+function drop(i) {
+    return function(event) {
+        state.dropped[i] = true;
+        update();
+    };
+}
+
+function resetDropped() {
+    state.dropped = state.dropped.map(_ => false);
+    update();
+}

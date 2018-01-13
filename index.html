@@ -4,20 +4,30 @@
 </head>
 <body onload="run()">
     <div class="header">
-        <input id="slider-numSines"
+        <input name="numSines"
                type="range"
                min="1" max="20" value="5"
-               class="slider input" orient="vertical">
-        <input id="slider-numSamples"
+               class="slider global input" orient="vertical">
+        <input name="numSamples"
                type="range"
                min="50" max="800" value="200"
-               class="slider input" orient="vertical">
+               class="slider global input" orient="vertical">
+        <input name="reset" type="button" value="undrop"
+               onclick="resetDropped()">
     </div>
+
     <div class="body">
-        <div class="sidebar left"></div>
+        <div id="left-controls" class="sidebar"></div>
         <div class="center">
-            <canvas id="canvas" />
+            <canvas id="canvas"></canvas>
+            <ul id="gravity-bars">
+                <li><div> </div></li>
+                <li><div> </div></li>
+                <li><div> </div></li>
+                <li><div> </div></li>
+                <li><div> </div></li>
+            </ul>
         </div>
-        <div class="sidebar right"></div>
+        <div id="right-controls" class="sidebar"></div>
     </div>
 </body>
